@@ -4,18 +4,11 @@ from pytube import YouTube
 from pytube.helpers import safe_filename
 # misc
 import os
-import shutil
-import math
-import datetime
 import sys
 import re
 # image operation
 import cv2
 import numpy as np
-
-def ocrFrame(vid, n):
-    vid.set(1,n)
-    frame = vid.get()
 
 def findTextFrame(text, vid, start=None, end=None, findFirst=True):
     if start == None:
@@ -30,7 +23,8 @@ def findTextFrame(text, vid, start=None, end=None, findFirst=True):
         for i in range(end, start, -1):
             pass
 
-def getKeyframes(file):
+def getKeyframes(inputFile, outputFile="tmp/keyframes.txt"):
+    os.system("ffprobe -loglevel error -select_streams v:0 -show_entries packet=pts_time,flags -of csv=print_section=0 '{}' | awk -F',' '/K/ {print $1}' > {}".format(inputFile, outputFile))
     kf = []
     with open(file, "r") as fp:
         text = fp.readlines()
@@ -55,6 +49,31 @@ def findEquivFrame(vid, refFr, start=None, end=None, findFirst=True, atol=10, ma
         if matchMin < np.count_nonzero(simArr)/simArr.size:
             return i
     return -1
+
+def generateReferenceFrame(vidInput, coords=(0,-1,0,-1), outputFile=None, timestamp=None, frame=None):
+    if timestamp is None and frame is None:
+        raise ValueError("1 of timestamp and frame must be specified.")
+    if timestamp is not None and frame is not None:
+        raise ValueError("timestamp and frame cannot both be specified.")
+
+    if (isinstance(vidInput, str)):
+        vid = cv2.VideoCapture(vidInput)
+    else:
+        vid = vidInput
+    fps = vid.get(cv2.CAP_PROP_FPS)
+    if timestamp:
+        frame = float(timestamp)
+        frame *= fps
+        frame = int(frame)
+    if frame > vid.get(cv2.CAP_PROP_FRAME_COUNT):
+        raise IndexError("Frame number {} not in the file".format(frame))
+    vid.set(cv2.CAP_PROP_POS_FRAMES, frame - 1)
+    result, frameImg = vid.read()
+    if result:
+        if outputFile:
+            cv2.imwrite(outputFile, frameImg[coords[0]:coords[1], coords[2]:coords[3]])
+        else:
+            return frameImg
 
 
 if __name__ == "__main__":
@@ -123,7 +142,6 @@ if __name__ == "__main__":
     #     print(encStr)
 
     #find keyframes, this will help copy most of the video rather than reencode
-    os.system("ffprobe -loglevel error -select_streams v:0 -show_entries packet=pts_time,flags -of csv=print_section=0 '%s' | awk -F',' '/K/ {print $1}' > tmp/keyframes.txt"%(fName))
     kf = getKeyframes("tmp/keyframes.txt")
     recap_kf = 0
     for item in kf:
@@ -141,9 +159,7 @@ if __name__ == "__main__":
         print("Intro ends at kf, skipping p2")
 
     muxTxt += "file '../tmp/p3.mp4'\n"
-    # cmdStr = "ffmpeg -y -loglevel error -i '{}' -c copy -ss {:0.2f} -to {:0.2f} -avoid_negative_ts 1 'tmp/{}'".format(fName, recap_kf, nextStart/fRate, "p3.mp4")
-    # print(cmdStr)
-    cmdStr = "ffmpeg -y -loglevel error -ss {:0.2f} -i '{}' -c copy -to {:0.2f} -avoid_negative_ts make_zero 'tmp/{}'".format(recap_kf, fName, nextStart/fRate - (recap_kf + 1/fRate), "p3.mp4")
+    cmdStr = "ffmpeg -y -loglevel error -ss {:0.2f} -i '{}' -c copy -to {:0.2f} -avoid_negative_ts make_zero 'tmp/{}'".format(recap_kf, fName, nextStart/fRate - recap_kf, "p3.mp4")
     print(cmdStr)
     os.system(cmdStr)
 
