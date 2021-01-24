@@ -4,32 +4,22 @@ from pytube import YouTube
 from pytube.helpers import safe_filename
 # misc
 import os
+import subprocess
 import sys
 import re
 # image operation
 import cv2
 import numpy as np
 
-def findTextFrame(text, vid, start=None, end=None, findFirst=True):
-    if start == None:
-        start = 0
-    if end == None:
-        end = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    if findFirst:
-        for i in range(start, end):
-            pass
-    else:
-        for i in range(end, start, -1):
-            pass
-
-def getKeyframes(inputFile, outputFile="tmp/keyframes.txt"):
-    os.system("ffprobe -loglevel error -select_streams v:0 -show_entries packet=pts_time,flags -of csv=print_section=0 '{}' | awk -F',' '/K/ {print $1}' > {}".format(inputFile, outputFile))
-    kf = []
-    with open(file, "r") as fp:
-        text = fp.readlines()
-        kf  = list(map(float, text))
-    return kf
+def getKeyframes(inputFile):
+    probe = subprocess.run(['ffprobe', '-loglevel', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags', '-of', 'csv=print_section=0', inputFile],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
+    if (probe.stderr):
+        raise RuntimeError(probe.stderr)
+    awk = subprocess.run(['awk', '-F,', '/K/ {print $1}'], input = probe.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
+    if (awk.stderr):
+        raise RuntimeError(awk.stderr)
+    return [float(x) for x in awk.stdout.split("\n") if x]
 
 def findEquivFrame(vid, refFr, start=None, end=None, findFirst=True, atol=10, matchMin=0.5, coords=(0,-1,0,716), incr=1):
     if start == None:
@@ -73,7 +63,7 @@ def generateReferenceFrame(vidInput, coords=(0,-1,0,-1), outputFile=None, timest
         if outputFile:
             cv2.imwrite(outputFile, frameImg[coords[0]:coords[1], coords[2]:coords[3]])
         else:
-            return frameImg
+            return frameImg[coords[0]:coords[1], coords[2]:coords[3]]
 
 
 if __name__ == "__main__":
@@ -87,12 +77,12 @@ if __name__ == "__main__":
     fRate = vid.get(cv2.CAP_PROP_FPS)
     print("The framerate is {}".format(fRate))
     if ("wave" in fName): #TODO this arguments
-        recapPath = "assets/waves_intro_screen.jpg"
+        recapPath = "assets/waves_intro_screen.png"
         recapCoords=(0,-1,0,65)
         recapRangeStart = 0
         recapRangeEnd = 150
         recapDefault = 64
-        nextEpPath = "assets/waves_outro_screen.jpg"
+        nextEpPath = "assets/waves_outro_screen.png"
         nextEpCoords=(0,-1,530,-1)
         nextEpRangeStart = 450
         nextEpOffset = 0
@@ -142,7 +132,7 @@ if __name__ == "__main__":
     #     print(encStr)
 
     #find keyframes, this will help copy most of the video rather than reencode
-    kf = getKeyframes("tmp/keyframes.txt")
+    kf = getKeyframes(fName)
     recap_kf = 0
     for item in kf:
         if int(item*fRate)>recapEnd:
@@ -170,4 +160,3 @@ if __name__ == "__main__":
     cmdStr = "ffmpeg -loglevel error -f concat -safe 0 -i {} -c copy -avoid_negative_ts make_non_negative 'output/{}'".format("tmp/muxlist.txt", outputName) #fName.replace(".mp4", "_final.mp4").replace("tmp/", ""))
     print(cmdStr)
     os.system(cmdStr)
-    #ffmpeg -f concat -safe 0 -i mylist.txt -c copy output.mp4
